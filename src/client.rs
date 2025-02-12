@@ -1,24 +1,65 @@
+use crate::config::Config;
 use crate::server::ALPN_QUIC_HTTP;
-use crate::verifier::SkipServerVerification;
+use crate::verifier::{create_custom_cert_verifier, SkipServerVerification};
 use quinn::{IdleTimeout, VarInt};
 use std::sync::Arc;
-use std::{error::Error, net::SocketAddr};
+use std::{error::Error, net::SocketAddr, time::Duration};
 use tokio::io::{stdin, stdout, AsyncReadExt, AsyncWriteExt};
 use tracing::{debug, error, info};
 
-pub(crate) async fn invoke(addr: SocketAddr) -> Result<(), Box<dyn Error>> {
+async fn try_connect(
+    endpoint: &mut quinn::Endpoint,
+    addr: SocketAddr,
+    name: &str,
+    retry: u32,
+    retry_interval: Duration,
+) -> Result<quinn::Connection, Box<dyn Error>> {
+    let mut attempts = 0;
+    loop {
+        match endpoint.connect(addr, name) {
+            Ok(connecting) => match connecting.await {
+                Ok(conn) => {
+                    info!(
+                        "Successfully established QUIC connection to {}",
+                        conn.remote_address()
+                    );
+                    return Ok(conn);
+                }
+                Err(e) => {
+                    attempts += 1;
+                    if attempts >= retry {
+                        error!("Failed to establish connection after {} attempts", retry);
+                        return Err(Box::new(e));
+                    }
+                    error!("Connection attempt {} failed: {}", attempts, e);
+                    tokio::time::sleep(retry_interval).await;
+                    continue;
+                }
+            },
+            Err(e) => return Err(Box::new(e)),
+        }
+    }
+}
+
+pub(crate) async fn invoke(addr: SocketAddr, config: Config) -> Result<(), Box<dyn Error>> {
     info!("Starting client connection to {}", addr);
 
     let mut client_crypto = rustls::ClientConfig::builder()
         .with_safe_defaults()
-        .with_custom_certificate_verifier(SkipServerVerification::new())
+        .with_custom_certificate_verifier(if config.verify_certificate {
+            create_custom_cert_verifier()
+        } else {
+            SkipServerVerification::new()
+        })
         .with_no_client_auth();
 
     client_crypto.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
 
     let mut transport_config = quinn::TransportConfig::default();
-    transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(15)));
-    transport_config.max_idle_timeout(Some(IdleTimeout::from(VarInt::from_u32(30_000))));
+    transport_config.keep_alive_interval(Some(config.keep_alive_interval));
+    transport_config.max_idle_timeout(Some(IdleTimeout::from(VarInt::from_u32(
+        config.idle_timeout.as_millis() as u32,
+    ))));
 
     let client_config = quinn::ClientConfig::new(Arc::new(client_crypto));
 
@@ -26,22 +67,14 @@ pub(crate) async fn invoke(addr: SocketAddr) -> Result<(), Box<dyn Error>> {
     let mut endpoint = quinn::Endpoint::client("[::]:0".parse().unwrap())?;
     endpoint.set_default_client_config(client_config.clone().into());
 
-    info!("Attempting to connect to {}", addr);
-    let connecting = endpoint.connect(addr, "localhost")?;
-
-    let conn = match connecting.await {
-        Ok(conn) => {
-            info!(
-                "Successfully established QUIC connection to {}",
-                conn.remote_address()
-            );
-            conn
-        }
-        Err(e) => {
-            error!("Failed to establish QUIC connection: {}", e);
-            return Err(Box::new(e));
-        }
-    };
+    let conn = try_connect(
+        &mut endpoint,
+        addr,
+        "localhost",
+        config.max_retries,
+        config.retry_interval,
+    )
+    .await?;
 
     info!("Opening bidirectional stream");
     let (send_stream, recv_stream) = match conn.open_bi().await {
@@ -62,8 +95,9 @@ pub(crate) async fn invoke(addr: SocketAddr) -> Result<(), Box<dyn Error>> {
     let send_task = {
         let mut stdin = stdin;
         let mut send_stream = send_stream;
+        let buffer_size = config.buffer_size;
         tokio::spawn(async move {
-            let mut buffer = [0u8; 1024];
+            let mut buffer = vec![0u8; buffer_size];
             loop {
                 match stdin.read(&mut buffer).await {
                     Ok(0) => {
@@ -89,8 +123,9 @@ pub(crate) async fn invoke(addr: SocketAddr) -> Result<(), Box<dyn Error>> {
     let recv_task = {
         let mut stdout = stdout;
         let mut recv_stream = recv_stream;
+        let buffer_size = config.buffer_size;
         tokio::spawn(async move {
-            let mut buffer = [0u8; 1024];
+            let mut buffer = vec![0u8; buffer_size];
             loop {
                 match recv_stream.read(&mut buffer).await {
                     Ok(Some(n)) => {
