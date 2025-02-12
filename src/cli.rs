@@ -9,37 +9,37 @@ use clap::{Parser, Subcommand};
     about,
     long_about = "A QUIC Proxy for SSH with enhanced features"
 )]
-pub(crate) struct Cli {
+pub struct Cli {
     /// Enable verbose logging
     #[arg(short, long, default_value = "false")]
-    pub(crate) verbose: bool,
+    pub verbose: bool,
 
     /// Keep-alive interval in seconds
     #[arg(long, default_value = "15")]
-    pub(crate) keep_alive: u64,
+    pub keep_alive: u64,
 
     /// Idle timeout in seconds
     #[arg(long, default_value = "30")]
-    pub(crate) idle_timeout: u64,
+    pub idle_timeout: u64,
 
     /// Buffer size in kilobytes
     #[arg(long, default_value = "16")]
-    pub(crate) buffer_size: usize,
+    pub buffer_size: usize,
 
     /// Maximum number of connection retries
     #[arg(long, default_value = "3")]
-    pub(crate) max_retries: u32,
+    pub max_retries: u32,
 
     /// Retry interval in seconds
     #[arg(long, default_value = "5")]
-    pub(crate) retry_interval: u64,
+    pub retry_interval: u64,
 
     #[command(subcommand)]
-    pub(crate) command: Commands,
+    pub command: Commands,
 }
 
 #[derive(Subcommand)]
-pub(crate) enum Commands {
+pub enum Commands {
     Server {
         /// Address to bind to
         #[arg(default_value = "127.0.0.1:4242")]
@@ -69,6 +69,7 @@ pub(crate) enum Commands {
 }
 
 impl Cli {
+    /// Convert command line arguments into a configuration object
     pub fn to_config(&self) -> crate::config::Config {
         let mut config = crate::config::Config::new()
             .with_keep_alive(Duration::from_secs(self.keep_alive))

@@ -1,15 +1,10 @@
-use std::error::Error;
-
 use clap::Parser;
-mod cli;
-mod client;
-mod config;
-mod server;
-mod verifier;
+use quicssh::cli::{Cli, Commands};
+use std::error::Error;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let args = cli::Cli::parse();
+    let args = Cli::parse();
     let config = args.to_config();
 
     if args.verbose {
@@ -19,7 +14,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tracing::debug!("Using configuration: {:?}", config);
 
     match args.command {
-        cli::Commands::Server { bind, .. } => server::invoke(bind, config).await,
-        cli::Commands::Client { addr, .. } => client::invoke(addr, config).await,
+        Commands::Server { bind, .. } => quicssh::server::invoke(bind, config).await,
+        Commands::Client { addr, .. } => quicssh::client::invoke(addr, config).await,
     }
 }

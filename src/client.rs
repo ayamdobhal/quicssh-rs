@@ -7,7 +7,8 @@ use std::{error::Error, net::SocketAddr, time::Duration};
 use tokio::io::{stdin, stdout, AsyncReadExt, AsyncWriteExt};
 use tracing::{debug, error, info};
 
-async fn try_connect(
+/// Try to establish a QUIC connection with retries
+pub(crate) async fn try_connect(
     endpoint: &mut quinn::Endpoint,
     addr: SocketAddr,
     name: &str,
@@ -41,7 +42,8 @@ async fn try_connect(
     }
 }
 
-pub(crate) async fn invoke(addr: SocketAddr, config: Config) -> Result<(), Box<dyn Error>> {
+/// Connect to a QUIC SSH server
+pub async fn invoke(addr: SocketAddr, config: Config) -> Result<(), Box<dyn Error>> {
     info!("Starting client connection to {}", addr);
 
     let mut client_crypto = rustls::ClientConfig::builder()

@@ -8,7 +8,8 @@ use tracing::{debug, error, info};
 
 pub const ALPN_QUIC_HTTP: &[&[u8]] = &[b"xyz"];
 
-fn load_certificates(
+/// Load or generate TLS certificates
+pub(crate) fn load_certificates(
     config: &Config,
 ) -> Result<(rustls::Certificate, rustls::PrivateKey), Box<dyn Error>> {
     if let (Some(cert_path), Some(key_path)) = (&config.cert_path, &config.key_path) {
@@ -26,7 +27,8 @@ fn load_certificates(
     }
 }
 
-async fn handle_connection(
+/// Handle an individual client connection
+pub(crate) async fn handle_connection(
     stream: TcpStream,
     send_stream: quinn::SendStream,
     mut recv_stream: quinn::RecvStream,
@@ -94,7 +96,8 @@ async fn handle_connection(
     info!("Transfer completed");
 }
 
-pub(crate) async fn invoke(bind: SocketAddr, config: Config) -> Result<(), Box<dyn Error>> {
+/// Start the QUIC SSH server
+pub async fn invoke(bind: SocketAddr, config: Config) -> Result<(), Box<dyn Error>> {
     let (cert, key) = load_certificates(&config)?;
     let certs = vec![cert];
 
